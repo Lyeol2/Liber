@@ -1,0 +1,69 @@
+name: Update documentation
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "source/**"
+      - "document/**"
+      - ".github/workflows/update-documentation.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-documentation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r document/requirements.txt
+
+      - name: Build documentation
+        run: mkdocs build --config-file document/mkdocs.yml --site-dir document/site
+
+      - name: Publish documentation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          staging_dir="$(mktemp -d)"
+          cp -a document/. "$staging_dir/"
+
+          git fetch origin document || true
+          if git show-ref --verify --quiet refs/remotes/origin/document; then
+            git switch document
+            git reset --hard origin/document
+          else
+            git switch --orphan document
+            git rm -rf .
+          fi
+
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          mkdir -p document
+          cp -a "$staging_dir"/. document/
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Documentation is already up to date."
+            exit 0
+          fi
+
+          git commit -m "Update generated documentation"
+          git push origin document
